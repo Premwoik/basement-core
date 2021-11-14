@@ -7,7 +7,7 @@
    [kernel,
     stdlib
    ]},
-  {env,[]},
+  {env,[{py_server, 'py@192.168.2.142'}]},
   {modules, []},
 
   {licenses, ["Apache 2.0"]},
