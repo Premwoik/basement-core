@@ -22,8 +22,10 @@
 
 -include_lib("kernel/include/logger.hrl").
 
+-type day() :: erlcron:dow() | null.
 -type circut_status() :: idle | running | blocked.
--type planned_run() :: {StartTime :: calendar:time(), Duration :: calendar:time()}.
+-type planned_run() ::
+    {Day :: day(), StartTime :: calendar:time(), Duration :: calendar:time()}.
 -type millis() :: integer().
 
 -record(circut,
@@ -85,7 +87,7 @@ init(_Args) ->
                  valve_pin = 23,
                  running_duration = {0, 10, 0},
                  break_duration = {0, 2, 0},
-                 planned_runs = [{{1, 16, 0}, {0, 15, 0}}],
+                 planned_runs = [{null, {11, 15, 0}, {0, 15, 0}}],
                  max_temp = 28.0,
                  min_temp = 24.0,
                  thermometer_id = "03172125f1ff",
@@ -198,12 +200,11 @@ handle_info({check_temperature, all}, State) ->
     {noreply, State3};
 handle_info({open_running_window, Name}, State) ->
     ?LOG_INFO("Open auto running window ~p", [Name]),
-    ok = gen_server:cast(self(), {run_circut, Name}),
+    %ok = gen_server:cast(self(), {run_circut, Name}),
     State2 = update_circut(State, Name, fun(Circut) -> Circut#circut{auto_allow = true} end),
     {noreply, State2};
-handle_info({close_running_window, Name, {Time, MDuration}}, State) ->
+handle_info({close_running_window, Name}, State) ->
     ?LOG_INFO("Close auto running window ~p", [Name]),
-    ok = timer_allow_auto(self(), Name, Time, MDuration),
     State2 = update_circut(State, Name, fun(Circut) -> Circut#circut{auto_allow = false} end),
     {noreply, State2};
 handle_info(_, State) ->
@@ -221,15 +222,26 @@ cancel_timer(Ref) ->
 init_runs_timers(Pid, Circuts) when is_list(Circuts) ->
     lists:map(fun(C) -> init_runs_timers(Pid, C) end, Circuts);
 init_runs_timers(Pid, Circut) ->
-    lists:map(fun({Time, Duration}) ->
-                 MDuration = interval_to_milils(Duration),
-                 timer_allow_auto(Pid, Circut#circut.name, Time, MDuration)
+    lists:map(fun ({null, Time, Duration}) ->
+                      ?LOG_INFO("Planned daily auto window at ~p duration ~p", [Time, Duration]),
+                      erlcron:daily(Time,
+                                    fun() -> cron_allow_auto(Pid, Circut#circut.name, Duration)
+                                    end);
+                  ({Day, Time, Duration}) ->
+                      ?LOG_INFO("Planned weekly auto window on days ~p at ~p duration ~p",
+                                [Day, Time, Duration]),
+                      erlcron:weekly(Day,
+                                     Time,
+                                     fun() -> cron_allow_auto(Pid, Circut#circut.name, Duration)
+                                     end)
               end,
               Circut#circut.planned_runs).
 
--spec time_difference(calendar:time(), calendar:time()) -> millis().
-time_difference(Time1, Time2) ->
-    abs(calendar:time_to_seconds(Time1) - calendar:time_to_seconds(Time2)) * 1000.
+cron_allow_auto(Pid, Name, Duration) ->
+    Pid ! {open_running_window, Name},
+    MDuration = interval_to_milils(Duration),
+    {ok, _TRef} = timer:send_after(MDuration, Pid, {close_running_window, Name}),
+    ok.
 
 -spec interval_to_milils(calendar:time()) -> millis().
 interval_to_milils(Time) ->
@@ -276,7 +288,7 @@ run_circut_when_temp_min(_Pid, _, _) ->
 send_get_temps_signal() ->
     try gen_server:call(?TEMP_SERVER, <<"get_temps">>) of
         {ok, Temps} ->
-            ?LOG_DEBUG("Read temperatures ~p", [Temps]),
+            ?LOG_INFO("Read temperatures ~p", [Temps]),
             Temps;
         {error, Error} ->
             ?LOG_ERROR("Read temperatures ERROR - ~p", [Error]),
@@ -312,12 +324,6 @@ timer_stop_circut(Pid, #circut{name = Name, running_duration = RunningTime}) ->
 timer_unblock_circut(Pid, #circut{name = Name, break_duration = BreakTime}) ->
     BreakTimeMillis = interval_to_milils(BreakTime),
     timer:send_after(BreakTimeMillis, Pid, {unblock_circut, Name}).
-
-timer_allow_auto(Pid, Name, Time, MDuration) ->
-    MTime = time_difference(time(), Time),
-    timer:send_after(MTime, Pid, {open_running_window, Name}),
-    timer:send_after(MTime + MDuration, Pid, {close_running_window, Name, {Time, MDuration}}),
-    ok.
 
 -spec update_circut(#state{}, atom(), function()) -> #state{}.
 update_circut(#state{circuts = Circuts} = State, Name, Fun) ->

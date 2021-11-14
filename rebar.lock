@@ -1,1 +1,4 @@
-[].
+[{<<"erlcron">>,
+  {git,"https://github.com/erlware/erlcron",
+       {ref,"48770996884fd2c498f194953d51ba8817154da7"}},
+  0}].
