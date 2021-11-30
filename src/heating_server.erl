@@ -185,6 +185,7 @@ handle_cast({run_circut, Name}, State) ->
                                  Circut
                          end
                       end),
+    ok = broadcast_status_update(State2),
     {noreply, State2};
 handle_cast({register, Pid}, #state{observers = Observers} = State) ->
     ?LOG_INFO("Registered observer ~p", [Pid]),
