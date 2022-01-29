@@ -25,6 +25,8 @@
 
 -include("heating.hrl").
 
+-define(CONFIG_PATH, "heating_state.conf").
+
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%
 %%% Api
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%
@@ -46,7 +48,7 @@ get_config() ->
 %% @doc Set the full state
 -spec set_config(#state{}) -> ok.
 set_config(Config) ->
-    gen_server:call(?MODULE, {set_config, Config}).
+    gen_server:cast(?MODULE, {set_config, Config}).
 
 %% @doc Gets the temp of the water in circut.
 -spec get_temps() -> {CircutName :: atom(), TempValue :: float()}.
@@ -72,38 +74,10 @@ set_auto(Name, Value) ->
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%
 
 init(_Args) ->
-    logger:info("Heating server started!"),
-    C1 = #circut{name = high,
-                 valve_pin = 23,
-                 running_duration = {0, 10, 0},
-                 break_duration = {0, 5, 0},
-                 planned_runs = [{null, {6, 20, 0}, {1, 0, 0}}, {null, {8, 0, 0}, {1, 0, 0}}],
-                 max_temp = 39.0,
-                 min_temp = 36.0,
-                 thermometer_id = "011833561aff",
-                 status = idle},
-    C2 = #circut{name = low,
-                 valve_pin = 24,
-                 running_duration = {0, 10, 0},
-                 break_duration = {0, 5, 0},
-                 max_temp = 40.0,
-                 min_temp = 35.0,
-                 thermometer_id = "01183362faff",
-                 status = idle},
-
-    Circuts = [C1, C2],
-
-    State =
-        #state{circuts = Circuts,
-               pomp_pin = 18,
-               temp_read_interval = {0, 0, 10},
-               boiler_thermometer_id = '',
-               boiler_min_temp = 40.0,
-               boiler_temp = null},
-
+    ?LOG_INFO("Heating server started!"),
+    State = try_read_state(),
     timer_check_temperature(self(), State#state.temp_read_interval),
-    init_runs_timers(self(), Circuts),
-
+    init_runs_timers(self(), State#state.circuts),
     {ok, State}.
 
 handle_cast({set_auto, Name, Value}, State) ->
@@ -149,8 +123,11 @@ handle_cast({unregister, Pid}, #state{observers = Observers} = State) ->
     State2 = State#state{observers = Observers2},
     {noreply, State2};
 handle_cast({set_config, State}, _) ->
+    ?LOG_INFO("Setting new config..."),
     lists:foreach(fun erlcron:cancel/1, erlcron:get_all_jobs()),
     init_runs_timers(self(), State#state.circuts),
+    save_config(State),
+    ?LOG_INFO("Config changed successfully!"),
     {noreply, State};
 handle_cast(_, State) ->
     {noreply, State}.
@@ -223,6 +200,58 @@ handle_info(_, State) ->
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%
 %%% Internal
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%
+
+default_state() ->
+    C1 = #circut{name = high,
+                 valve_pin = 23,
+                 running_duration = {0, 10, 0},
+                 break_duration = {0, 5, 0},
+                 planned_runs = [{null, {6, 20, 0}, {1, 0, 0}}, {null, {8, 0, 0}, {1, 0, 0}}],
+                 max_temp = 39.0,
+                 min_temp = 36.0,
+                 thermometer_id = "011833561aff",
+                 status = idle},
+    C2 = #circut{name = low,
+                 valve_pin = 24,
+                 running_duration = {0, 10, 0},
+                 break_duration = {0, 5, 0},
+                 max_temp = 40.0,
+                 min_temp = 35.0,
+                 thermometer_id = "01183362faff",
+                 status = idle},
+
+    Circuts = [C1, C2],
+
+    #state{circuts = Circuts,
+           pomp_pin = 18,
+           temp_read_interval = {0, 0, 10},
+           boiler_thermometer_id = '',
+           boiler_min_temp = 40.0,
+           boiler_temp = null}.
+
+try_read_state() ->
+    case file:consult(?CONFIG_PATH) of
+        {ok, [State]} ->
+            clear_state_variables(State);
+        _ ->
+            State = default_state(),
+            save_config(State),
+            State
+    end.
+
+save_config(State) ->
+    ?LOG_INFO("Saving config to file..."),
+    file:write_file(?CONFIG_PATH, io_lib:format("~p.~n", [State])).
+
+clear_state_variables(State) ->
+    Circuts =
+        lists:map(fun(C) ->
+                     C#circut{status = idle,
+                              current_temp = null,
+                              stop_timer_ref = null}
+                  end,
+                  State#state.circuts),
+    State#state{circuts = Circuts, boiler_temp = null}.
 
 cancel_timer(null) ->
     ok;
