@@ -11,6 +11,8 @@
 -define(PY_SERVER, application:get_env(basement_core, py_server, py@localhost)).
 -define(THERMOSTATS_SERVER, {thermostats_server, ?PY_SERVER}).
 
+-ignore_xref([cleanup/0, mode_bcm/0, setup_pin/2]).
+
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%
 %%% Api
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%
