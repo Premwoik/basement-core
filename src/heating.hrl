@@ -8,7 +8,7 @@
         {name :: atom(),
          break_duration :: calendar:time(),
          running_duration :: calendar:time(),
-         stop_timer_ref = null :: reference() | null,
+         stop_timer_ref = null :: timer:tref() | null,
          max_temp :: float(),
          min_temp :: float(),
          status :: circut_status(),

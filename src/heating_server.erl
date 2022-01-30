@@ -36,7 +36,7 @@ start_link() ->
     gen_server:start_link({local, ?MODULE}, ?MODULE, [], []).
 
 %% @doc Runs the circut under given name.
--spec run_circut(CircutName :: atom()) -> ok.
+-spec run_circut(CircutName :: atom() | integer()) -> ok.
 run_circut(Circut) ->
     gen_server:cast(?MODULE, {run_circut, Circut}).
 
@@ -83,6 +83,14 @@ init(_Args) ->
 handle_cast({set_auto, Name, Value}, State) ->
     State2 = update_circut(State, Name, fun(Circut) -> Circut#circut{auto_allow = Value} end),
     {noreply, State2};
+handle_cast({run_circut, Id}, State) when is_integer(Id) ->
+    case Id >= 0 andalso Id < length(State#state.circuts) of
+        true ->
+            #circut{name = Name} = lists:nth(Id, State#state.circuts),
+            handle_cast({run_circut, Name}, State);
+        false ->
+            {noreply, State}
+    end;
 handle_cast({run_circut, Name}, State) ->
     State2 =
         update_circut(State,
@@ -220,12 +228,10 @@ default_state() ->
                  thermometer_id = "01183362faff",
                  status = idle},
 
-    Circuts = [C1, C2],
-
-    #state{circuts = Circuts,
+    #state{circuts = [C1, C2],
            pomp_pin = 18,
            temp_read_interval = {0, 0, 10},
-           boiler_thermometer_id = '',
+           boiler_thermometer_id = "",
            boiler_min_temp = 40.0,
            boiler_temp = null}.
 
@@ -305,8 +311,6 @@ stop_circut_when_temp_max(_Pid, _, _) ->
     ok.
 
 -spec run_circut_when_temp_min(pid(), float(), #circut{}) -> ok.
-run_circut_when_temp_min(_Pid, null, _) ->
-    ok;
 run_circut_when_temp_min(Pid,
                          Temp,
                          #circut{name = Name,
