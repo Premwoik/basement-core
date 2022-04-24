@@ -19,11 +19,11 @@
 
 -export([start_link/0, register_observer/1, unregister_observer/1, get_config/0,
          set_config/1, run_circut/1, get_temps/0, set_auto/2, init/1, handle_call/3, handle_info/2,
-         handle_cast/2]).
+         handle_cast/2, log_info/0, log_error/0]).
 
 -ignore_xref([start_link/0, register_observer/1, unregister_observer/1, get_config/0,
          set_config/1, run_circut/1, get_temps/0, set_auto/2, init/1, handle_call/3, handle_info/2,
-         handle_cast/2]).
+         handle_cast/2, log_info/0, log_error/0]).
 
 -include_lib("kernel/include/logger.hrl").
 
@@ -72,6 +72,14 @@ unregister_observer(Pid) ->
 -spec set_auto(CircutName :: string(), Value :: boolean()) -> ok.
 set_auto(Name, Value) ->
     gen_server:cast(?MODULE, {set_auto, Name, Value}).
+
+-spec log_info() -> any().
+log_info() ->
+    logger:set_module_level(heating_server, info).
+
+-spec log_error() -> any().
+log_error() ->
+    logger:set_module_level(heating_server, error).
 
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%
 %%% Callback
@@ -185,7 +193,8 @@ handle_info({stop_circut, Name}, State) ->
     {noreply, State2};
 handle_info({check_temperature, all}, State) ->
     timer_check_temperature(self(), State#state.temp_read_interval),
-    Temps = hardware_tools:read_all_thermostats(),
+    Temps = hardware_api:read_temperature_all(),
+    ?LOG_INFO("Read temperatures: ~p", [Temps]),
     State2 = update_boiler_temp(State, Temps),
     State3 =
         update_circuts(State2,
@@ -231,10 +240,18 @@ default_state() ->
                  min_temp = 35.0,
                  thermometer_id = "01183362faff",
                  status = idle},
+    C3 = #circut{name = floor_heating,
+                 valve_pin = 25,
+                 running_duration = {1, 0, 0},
+                 break_duration = {0, 1, 0},
+                 max_temp = 24.5,
+                 min_temp = 23.0,
+                 thermometer_id = "3c01f095d8f4",
+                 status = idle},
 
-    #state{circuts = [C1, C2],
+    #state{circuts = [C1, C2, C3],
            pomp_pin = 18,
-           temp_read_interval = {0, 0, 10},
+           temp_read_interval = {0, 0, 30},
            boiler_thermometer_id = "",
            boiler_min_temp = 40.0,
            boiler_temp = null}.
@@ -333,12 +350,12 @@ run_circut_when_temp_min(_Pid, _, _) ->
 
 send_pomp_start_signal(#state{pomp_pin = PompPin},
                        #circut{name = Name, valve_pin = Pin}) ->
-    hardware_tools:pin_output({Pin, PompPin}, low),
+    hardware_api:write_pins([Pin, PompPin], low),
     logger:debug("Sending starting pomp signal ~p", [Name]).
 
 send_pomp_stop_signal(#state{pomp_pin = PompPin},
                       #circut{name = Name, valve_pin = Pin}) ->
-    hardware_tools:pin_output({Pin, PompPin}, high),
+    hardware_api:write_pins([Pin, PompPin], high),
     logger:debug("Sending stopping pomp signal ~p", [Name]).
 
 timer_check_temperature(Pid, Interval) ->
