@@ -1,7 +1,8 @@
 -module(hardware_api).
 
 %% Thermometers API
--export([scan_w1_devices/0, scan_w1_thermometers/0, read_temperature/1, read_temperature_all/0]).
+-export([scan_w1_devices/0, scan_w1_thermometers/0, read_temperature/1,
+         read_temperature_all/0]).
 %% GPIO API
 -export([read_pin/1, read_pins/1, write_pin/2, write_pins/2]).
 
@@ -24,26 +25,25 @@ read_temperature(Name) ->
     Name2 = lists:flatten([?W1, "/28-", Name, "/temperature"]),
     case file:read_file(Name2) of
         {ok, Temp} ->
-	    case string:to_integer(binary_to_list(Temp)) of
-		 {error, _} ->
-		     {error, cannot_parse};
-	         {TempInt, _} ->
-		     {ok, TempInt / 1000}
-	    end;
+            case string:to_integer(binary_to_list(Temp)) of
+                {error, _} ->
+                    {error, cannot_parse};
+                {TempInt, _} ->
+                    {ok, TempInt / 1000}
+            end;
         _ ->
             {error, cannot_read}
     end.
 
 -spec read_temperature_all() -> [{string(), float()}].
 read_temperature_all() ->
-    lists:filtermap(fun(T) -> 
-		         case read_temperature(T) of
-			     {ok, Temp} ->
-			         {true, {T, Temp}};
-			     _ ->
-			         false
-			 end
-		     end, scan_w1_thermometers()).
+    lists:filtermap(fun(T) ->
+                       case read_temperature(T) of
+                           {ok, Temp} -> {true, {T, Temp}};
+                           _ -> false
+                       end
+                    end,
+                    scan_w1_thermometers()).
 
 %% GPIO API
 
@@ -60,7 +60,7 @@ read_pin(Pin) ->
 
 -spec read_pins([integer()]) -> [{integer(), high | low | undefined}].
 read_pins(Pins) ->
-   [{P, read_pin(P)} || P <- Pins].
+    [{P, read_pin(P)} || P <- Pins].
 
 -spec write_pin(integer(), high | low) -> ok | {error, term()}.
 write_pin(Pin, Value) ->

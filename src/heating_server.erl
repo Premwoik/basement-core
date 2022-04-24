@@ -21,9 +21,20 @@
          set_config/1, run_circut/1, get_temps/0, set_auto/2, init/1, handle_call/3, handle_info/2,
          handle_cast/2, log_info/0, log_error/0]).
 
--ignore_xref([start_link/0, register_observer/1, unregister_observer/1, get_config/0,
-         set_config/1, run_circut/1, get_temps/0, set_auto/2, init/1, handle_call/3, handle_info/2,
-         handle_cast/2, log_info/0, log_error/0]).
+-ignore_xref([start_link/0,
+              register_observer/1,
+              unregister_observer/1,
+              get_config/0,
+              set_config/1,
+              run_circut/1,
+              get_temps/0,
+              set_auto/2,
+              init/1,
+              handle_call/3,
+              handle_info/2,
+              handle_cast/2,
+              log_info/0,
+              log_error/0]).
 
 -include_lib("kernel/include/logger.hrl").
 
