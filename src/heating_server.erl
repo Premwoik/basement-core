@@ -17,9 +17,10 @@
 
 -behaviour(gen_server).
 
--export([start_link/0, register_observer/1, unregister_observer/1, get_config/0,
-         set_config/1, run_circut/1, get_temps/0, set_auto/2, init/1, handle_call/3, handle_info/2,
-         handle_cast/2, log_info/0, log_error/0]).
+-export([start_link/0, register_observer/1, unregister_observer/1,
+         is_registered_observer/1, get_config/0, set_config/1, run_circut/1, get_temps/0,
+         set_auto/2, init/1, handle_call/3, handle_info/2, handle_cast/2, log_info/0,
+         log_error/0]).
 
 -ignore_xref([start_link/0,
               register_observer/1,
@@ -79,6 +80,10 @@ register_observer(Pid) ->
 unregister_observer(Pid) ->
     gen_server:cast(?MODULE, {unregister, Pid}).
 
+-spec is_registered_observer(pid()) -> {ok, binary()}.
+is_registered_observer(Pid) ->
+    gen_server:call(?MODULE, {is_registered, Pid}).
+
 %% @doc Allows to set auto mode manually (circut can be run based on the temp on the pipe).
 -spec set_auto(CircutName :: string(), Value :: boolean()) -> ok.
 set_auto(Name, Value) ->
@@ -107,7 +112,7 @@ handle_cast({set_auto, Name, Value}, State) ->
     State2 = update_circut(State, Name, fun(Circut) -> Circut#circut{auto_allow = Value} end),
     {noreply, State2};
 handle_cast({run_circut, Id}, State) when is_integer(Id) ->
-    case Id >= 0 andalso Id < length(State#state.circuts) of
+    case Id > 0 andalso Id < length(State#state.circuts) of
         true ->
             #circut{name = Name} = lists:nth(Id, State#state.circuts),
             handle_cast({run_circut, Name}, State);
@@ -163,6 +168,8 @@ handle_cast({set_config, State}, _) ->
 handle_cast(_, State) ->
     {noreply, State}.
 
+handle_call({is_registered, Pid}, _From, #state{observers = Observers} = State) ->
+    {reply, {ok, lists:member(Pid, Observers)}, State};
 handle_call(get_config, _From, State) ->
     {reply, {ok, State}, State};
 handle_call(get_temps, _From, State) ->

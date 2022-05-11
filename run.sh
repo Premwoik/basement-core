@@ -11,7 +11,7 @@ clean_up() {
   echo "25" > /sys/class/gpio/unexport
   # leds lower bathroom
   echo "8" > /sys/class/gpio/unexport
-  echo "GPIO 18, 23, 24, 25 unexported"
+  echo "GPIO 18, 23, 24, 25, 8 unexported"
   exit 0
 }
 
