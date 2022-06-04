@@ -109,41 +109,30 @@ init(_Args) ->
     {ok, State}.
 
 handle_cast({set_auto, Name, Value}, State) ->
-    State2 = update_circut(State, Name, fun(Circut) -> Circut#circut{auto_allow = Value} end),
+    State2 =
+        update_circut(State, Name, fun(Circut, _) -> Circut#circut{auto_allow = Value} end),
     {noreply, State2};
 handle_cast({run_circut, Id}, State) when is_integer(Id) ->
-    case Id > 0 andalso Id < length(State#state.circuts) of
+    case Id > 0 andalso Id =< length(State#state.circuts) of
         true ->
             #circut{name = Name} = lists:nth(Id, State#state.circuts),
             handle_cast({run_circut, Name}, State);
         false ->
             {noreply, State}
     end;
-handle_cast({run_circut, Name}, State) ->
+handle_cast({run_circut, Name}, InState) ->
     State2 =
-        update_circut(State,
+        update_circut(InState,
                       Name,
-                      fun(Circut) ->
+                      fun(Circut, State) ->
                          case Circut#circut.status of
-                             idle ->
-                                 case State#state.boiler_temp of
-                                     Temp
-                                         when (Temp == null)
-                                              or (Temp >= State#state.boiler_min_temp) ->
-                                         logger:info("Starting pomp on circut ~p", [Name]),
-                                         send_pomp_start_signal(State, Circut),
-                                         Ref = timer_stop_circut(self(), Circut),
-                                         Circut#circut{status = running, stop_timer_ref = Ref};
-                                     _ ->
-                                         logger:info("Boiler temp is too low ~p", [Name]),
-                                         Circut
-                                 end;
+                             idle -> do_run_circut(Circut, State);
                              blocked ->
-                                 logger:info("Circut ~p cannot be run as frequent. Wait some time.",
-                                             [Name]),
+                                 ?LOG_INFO("Circut ~p cannot be run as frequent. Wait some time.",
+                                           [Name]),
                                  Circut;
                              running ->
-                                 logger:info("Circut ~p is just running", [Name]),
+                                 ?LOG_INFO("Circut ~p is just running", [Name]),
                                  Circut
                          end
                       end),
@@ -183,7 +172,7 @@ handle_info({unblock_circut, Name}, State) ->
     State2 =
         update_circut(State,
                       Name,
-                      fun(Circut) ->
+                      fun(Circut, _) ->
                          case Circut#circut.status of
                              blocked ->
                                  logger:info("Unblocking circut ~p", [Name]),
@@ -196,16 +185,22 @@ handle_info({unblock_circut, Name}, State) ->
 
     ok = broadcast_status_update(State2),
     {noreply, State2};
-handle_info({stop_circut, Name}, State) ->
+handle_info({stop_circut, Name}, InState) ->
     State2 =
-        update_circut(State,
+        update_circut(InState,
                       Name,
-                      fun(Circut) ->
-                         ?LOG_INFO("Stopping pomp on circut ~p", [Name]),
-                         cancel_timer(Circut#circut.stop_timer_ref),
-                         send_pomp_stop_signal(State, Circut),
-                         timer_unblock_circut(self(), Circut),
-                         Circut#circut{status = blocked}
+                      fun (#circut{type = cwu} = Circut, #state{pomp = Pomp} = State) ->
+                              ?LOG_INFO("Stopping pomp on circut ~p", [Name]),
+                              cancel_timer(Circut#circut.stop_timer_ref),
+                              send_stop_signal(State, Circut),
+                              timer_unblock_circut(self(), Circut),
+                              State2 = State#state{pomp = Pomp#cwu_pomp{status = false}},
+                              {Circut#circut{status = blocked}, State2};
+                          (#circut{type = floor} = Circut, State) ->
+                              ?LOG_INFO("Stopping floor wire on circut ~p", [Name]),
+                              cancel_timer(Circut#circut.stop_timer_ref),
+                              send_stop_signal(State, Circut),
+                              Circut#circut{status = idle}
                       end),
     ok = broadcast_status_update(State2),
     {noreply, State2};
@@ -216,7 +211,7 @@ handle_info({check_temperature, all}, State) ->
     State2 = update_boiler_temp(State, Temps),
     State3 =
         update_circuts(State2,
-                       fun(Circut) ->
+                       fun(Circut, _) ->
                           NewTemp = proplists:get_value(Circut#circut.thermometer_id, Temps, null),
                           ok = stop_circut_when_temp_max(self(), NewTemp, Circut),
                           ok = run_circut_when_temp_min(self(), NewTemp, Circut),
@@ -227,11 +222,13 @@ handle_info({check_temperature, all}, State) ->
 handle_info({open_running_window, Name}, State) ->
     ?LOG_INFO("Open auto running window ~p", [Name]),
     ok = gen_server:cast(self(), {run_circut, Name}),
-    State2 = update_circut(State, Name, fun(Circut) -> Circut#circut{auto_allow = true} end),
+    State2 =
+        update_circut(State, Name, fun(Circut, _) -> Circut#circut{auto_allow = true} end),
     {noreply, State2};
 handle_info({close_running_window, Name}, State) ->
     ?LOG_INFO("Close auto running window ~p", [Name]),
-    State2 = update_circut(State, Name, fun(Circut) -> Circut#circut{auto_allow = false} end),
+    State2 =
+        update_circut(State, Name, fun(Circut, _) -> Circut#circut{auto_allow = false} end),
     {noreply, State2};
 handle_info(_, State) ->
     {noreply, State}.
@@ -239,6 +236,33 @@ handle_info(_, State) ->
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%
 %%% Internal
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%
+
+-spec do_run_circut(circut(), state()) -> circut().
+do_run_circut(#circut{type = cwu, name = Name} = Circut, #state{pomp = Pomp} = State) ->
+    case State#state.boiler_temp of
+        Temp when (Temp == null) or (Temp >= State#state.boiler_min_temp) ->
+            case State#state.pomp of
+                %% It is possible to run only one cwu circut at the same time.
+                %% Thus when cwu pomp is running the next circut cannot be started.
+                #cwu_pomp{status = false} ->
+                    ?LOG_INFO("Starting pomp on circut ~p", [Name]),
+                    send_start_signal(State, Circut),
+                    Ref = timer_stop_circut(self(), Circut),
+                    State2 = State#state{pomp = Pomp#cwu_pomp{status = true}},
+                    {Circut#circut{status = running, stop_timer_ref = Ref}, State2};
+                _ ->
+                    ?LOG_INFO("The other C.W.U circut is running"),
+                    Circut
+            end;
+        _ ->
+            ?LOG_INFO("Boiler temp is too low ~p", [Name]),
+            Circut
+    end;
+do_run_circut(#circut{type = floor, name = Name} = Circut, State) ->
+    send_start_signal(State, Circut),
+    Ref = timer_stop_circut(self(), Circut),
+    ?LOG_INFO("Starting floor heating on circut ~p", [Name]),
+    Circut#circut{status = running, stop_timer_ref = Ref}.
 
 default_state() ->
     C1 = #circut{name = high,
@@ -265,10 +289,11 @@ default_state() ->
                  max_temp = 24.5,
                  min_temp = 23.0,
                  thermometer_id = "3c01f095d8f4",
-                 status = idle},
+                 status = idle,
+                 type = floor},
 
     #state{circuts = [C1, C2, C3],
-           pomp_pin = 18,
+           pomp = #cwu_pomp{pin = 18, status = false},
            temp_read_interval = {0, 0, 30},
            boiler_thermometer_id = "",
            boiler_min_temp = 40.0,
@@ -366,13 +391,25 @@ run_circut_when_temp_min(Pid,
 run_circut_when_temp_min(_Pid, _, _) ->
     ok.
 
-send_pomp_start_signal(#state{pomp_pin = PompPin},
-                       #circut{name = Name, valve_pin = Pin}) ->
+send_start_signal(_State,
+                  #circut{type = floor,
+                          name = Name,
+                          valve_pin = Pin}) ->
+    hardware_api:write_pins([Pin], low),
+    logger:debug("Sending starting pomp signal ~p", [Name]);
+send_start_signal(#state{pomp = #cwu_pomp{pin = PompPin}},
+                  #circut{name = Name, valve_pin = Pin}) ->
     hardware_api:write_pins([Pin, PompPin], low),
     logger:debug("Sending starting pomp signal ~p", [Name]).
 
-send_pomp_stop_signal(#state{pomp_pin = PompPin},
-                      #circut{name = Name, valve_pin = Pin}) ->
+send_stop_signal(_State,
+                 #circut{type = floor,
+                         name = Name,
+                         valve_pin = Pin}) ->
+    hardware_api:write_pins([Pin], high),
+    logger:debug("Sending stopping pomp signal ~p", [Name]);
+send_stop_signal(#state{pomp = #cwu_pomp{pin = PompPin}},
+                 #circut{name = Name, valve_pin = Pin}) ->
     hardware_api:write_pins([Pin, PompPin], high),
     logger:debug("Sending stopping pomp signal ~p", [Name]).
 
@@ -389,22 +426,38 @@ timer_unblock_circut(Pid, #circut{name = Name, break_duration = BreakTime}) ->
     BreakTimeMillis = interval_to_milils(BreakTime),
     timer:send_after(BreakTimeMillis, Pid, {unblock_circut, Name}).
 
--spec update_circut(#state{}, atom(), function()) -> #state{}.
-update_circut(#state{circuts = Circuts} = State, Name, Fun) ->
-    Circuts2 =
-        lists:map(fun(C) ->
-                     case C#circut.name == Name of
-                         true -> Fun(C);
-                         _ -> C
-                     end
-                  end,
-                  Circuts),
-    State#state{circuts = Circuts2}.
+-type update_fun() :: fun((circut(), state()) -> {circut(), state()} | circut()).
+-type update_acc() :: {state(), [circut()]}.
+
+-spec run_update_fun(circut(), update_acc(), update_fun()) -> update_acc().
+run_update_fun(Circut, {State, CirAcc}, Fun) ->
+    case Fun(Circut, State) of
+        {Circut2, State2} ->
+            {State2, [Circut2 | CirAcc]};
+        Circut2 ->
+            {State, [Circut2 | CirAcc]}
+    end.
+
+-spec update_circut(#state{}, atom(), update_fun()) -> #state{}.
+update_circut(#state{circuts = Circuts} = InState, Name, Fun) ->
+    {State2, Circuts2} =
+        lists:foldr(fun(C, {State, CirAcc}) ->
+                       case C#circut.name == Name of
+                           true -> run_update_fun(C, {State, CirAcc}, Fun);
+                           _ -> {State, [C | CirAcc]}
+                       end
+                    end,
+                    {InState, []},
+                    Circuts),
+    State2#state{circuts = Circuts2}.
 
 -spec update_circuts(#state{}, function()) -> #state{}.
-update_circuts(#state{circuts = Circuts} = State, Fun) ->
-    Circuts2 = lists:map(fun(C) -> Fun(C) end, Circuts),
-    State#state{circuts = Circuts2}.
+update_circuts(#state{circuts = Circuts} = InState, Fun) ->
+    {State2, Circuts2} =
+        lists:foldr(fun(Circut, Acc) -> run_update_fun(Circut, Acc, Fun) end,
+                    {InState, []},
+                    Circuts),
+    State2#state{circuts = Circuts2}.
 
 -spec update_boiler_temp(#state{}, [{string(), float()}]) -> #state{}.
 update_boiler_temp(State, Temps) ->
