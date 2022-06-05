@@ -11,6 +11,10 @@ clean_up() {
   echo "25" > /sys/class/gpio/unexport
   # leds lower bathroom
   echo "8" > /sys/class/gpio/unexport
+  echo "7" > /sys/class/gpio/unexport
+  echo "1" > /sys/class/gpio/unexport
+  echo "27" > /sys/class/gpio/unexport
+  echo "22" > /sys/class/gpio/unexport
   echo "GPIO 18, 23, 24, 25, 8 unexported"
   exit 0
 }
@@ -25,6 +29,14 @@ echo "25" > /sys/class/gpio/export
 sudo sh -c 'echo "high" > /sys/class/gpio/gpio25/direction'
 echo "8" > /sys/class/gpio/export
 sudo sh -c 'echo "high" > /sys/class/gpio/gpio8/direction'
+echo "7" > /sys/class/gpio/export
+sudo sh -c 'echo "high" > /sys/class/gpio/gpio7/direction'
+echo "1" > /sys/class/gpio/export
+sudo sh -c 'echo "high" > /sys/class/gpio/gpio1/direction'
+echo "27" > /sys/class/gpio/export
+sudo sh -c 'echo "high" > /sys/class/gpio/gpio27/direction'
+echo "22" > /sys/class/gpio/export
+sudo sh -c 'echo "high" > /sys/class/gpio/gpio22/direction'
 echo "GPIO 18, 23, 24, 25, 8 exported"
 
 trap clean_up INT
