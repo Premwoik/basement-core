@@ -28,7 +28,7 @@ write_payload(Payload) ->
     case hackney:request(post, URL, Headers, Payload, []) of
         {ok, 204, _, _} ->
             ok;
-        _ ->
-            ?LOG_WARNING("InfluxDB :: ~B :: Cannot write to InfluxDB"),
+        Err ->
+            ?LOG_WARNING("InfluxDB :: Cannot write to InfluxDB~n~p~n", [Err]),
             error
     end.
