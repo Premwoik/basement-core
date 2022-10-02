@@ -207,6 +207,7 @@ handle_info({stop_circut, Name}, InState) ->
 handle_info({check_temperature, all}, State) ->
     timer_check_temperature(self(), State#state.temp_read_interval),
     Temps = hardware_api:read_temperature_all(),
+    influx_client:write_temperatures(Temps),
     ?LOG_INFO("Read temperatures: ~p", [Temps]),
     State2 = update_boiler_temp(State, Temps),
     State3 =
