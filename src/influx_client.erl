@@ -25,7 +25,7 @@ write_temperatures(Pairs) ->
 write_payload(Payload) ->
     URL = hackney_url:make_url(?URL, <<"api/v2/write">>, [{org, ?ORG}, {bucket, ?BUCKET}]),
     Headers = [{<<"Content-Type">>, <<"text/plain">>}, {"Authorization", ?TOKEN}],
-    case hackney:request(post, URL, Headers, Payload, []) of
+    case hackney:request(post, URL, Headers, Payload, [{pool, false}]) of
         {ok, 204, _, _} ->
             ok;
         Err ->
