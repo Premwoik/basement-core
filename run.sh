@@ -7,15 +7,19 @@ clean_up() {
   echo "23" > /sys/class/gpio/unexport
   # circut lower bathroom
   echo "24" > /sys/class/gpio/unexport
-  # floor heating lower bathroom
+  # led lights bathroom
   echo "25" > /sys/class/gpio/unexport
   # leds lower bathroom
   echo "8" > /sys/class/gpio/unexport
+  # lower bathroom fan
   echo "7" > /sys/class/gpio/unexport
+  # empty pin
   echo "1" > /sys/class/gpio/unexport
+  # radiator on the wall
   echo "27" > /sys/class/gpio/unexport
+  # heating floor
   echo "22" > /sys/class/gpio/unexport
-  echo "GPIO 18, 23, 24, 25, 8 unexported"
+  echo "GPIO 18, 23, 24, 25, 8, 7, 1, 27, 22 unexported"
   exit 0
 }
 
@@ -37,7 +41,7 @@ echo "27" > /sys/class/gpio/export
 sudo sh -c 'echo "high" > /sys/class/gpio/gpio27/direction'
 echo "22" > /sys/class/gpio/export
 sudo sh -c 'echo "high" > /sys/class/gpio/gpio22/direction'
-echo "GPIO 18, 23, 24, 25, 8 exported"
+echo "GPIO 18, 23, 24, 25, 8, 7, 1, 22, 27 exported"
 
 trap clean_up INT
 

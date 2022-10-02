@@ -1,3 +1,6 @@
+%% @doc The interface to communicate with the hardware. Allows to read/write pins,
+%% and read thermometers.
+%% @end
 -module(hardware_api).
 
 %% Thermometers API

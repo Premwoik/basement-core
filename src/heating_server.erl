@@ -283,7 +283,7 @@ default_state() ->
                  thermometer_id = "01183362faff",
                  status = idle},
     C3 = #circut{name = floor_heating,
-                 valve_pin = 25,
+                 valve_pin = 22,
                  running_duration = {1, 0, 0},
                  break_duration = {0, 1, 0},
                  max_temp = 24.5,
